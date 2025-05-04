@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Money Map - Player Earnings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: sans-serif; }
+    #container { display: flex; height: 100vh; }
+    #map { flex: 2; height: 100vh; }
+    #sidebar { flex: 1; padding: 10px; overflow-y: auto; background: #f4f4f4; }
+    .country h3 { margin: 0; cursor: pointer; }
+    .players { display: none; margin-left: 10px; }
+    .player { color: blue; cursor: pointer; text-decoration: underline; }
+    .ticker { font-size: 0.85em; color: #333; }
+    #modal {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%; background: rgba(0,0,0,0.85);
+      color: white; padding: 20px; overflow-y: auto; z-index: 9999;
+    }
+    #closeModal {
+      position: absolute; top: 10px; right: 20px;
+      font-size: 28px; cursor: pointer;
+    }
+    #chart-container { padding: 20px; background: white; }
+  </style>
+</head>
+<body>
+<div id="container">
+  <div id="map"></div>
+  <div id="sidebar">
+    <h3>Players by City</h3>
+    <div id="playerList"></div>
+  </div>
+</div>
+
+<div id="chart-container">
+  <h3>Earnings Per Second (Live)</h3>
+  <canvas id="earningsChart" width="600" height="300"></canvas>
+</div>
+
+<div id="modal">
+  <span id="closeModal">&times;</span>
+  <div id="modalContent"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+window.onload = function () {
+  const sessionStart = Date.now();
+
+  const playerData = {
+    'US-LA': { countryName: 'Los Angeles, CA', coords: [34.05, -118.25], players: [
+      { name: "LeBron James", team: "LA Lakers", league: "NBA", salary: 48200000, endorsements: 80000000, bio: "Basketball legend and entrepreneur." }
+    ]},
+    'US-SF': { countryName: 'San Francisco, CA', coords: [37.77, -122.42], players: [
+      { name: "Stephen Curry", team: "Warriors", league: "NBA", salary: 51800000, endorsements: 50000000, bio: "NBA's best shooter." }
+    ]},
+    'US-MIA': { countryName: 'Miami, FL', coords: [25.76, -80.19], players: [
+      { name: "Lionel Messi", team: "Inter Miami", league: "MLS", salary: 65000000, endorsements: 70000000, bio: "Argentinian football legend." }
+    ]},
+    'US-NY': { countryName: 'New York, NY', coords: [40.71, -74.01], players: [
+      { name: "Serena Williams", team: "Retired", league: "Tennis", salary: 15000000, endorsements: 35000000, bio: "Tennis icon." }
+    ]},
+    'US-MN': { countryName: 'Minneapolis, MN', coords: [44.98, -93.27], players: [
+      { name: "Anthony Edwards", team: "Timberwolves", league: "NBA", salary: 13000000, endorsements: 4000000, bio: "Rising NBA star." }
+    ]}
+  };
+
+  for (const loc of Object.values(playerData)) {
+    loc.players.forEach(p => {
+      p.perSecond = (p.salary + p.endorsements) / 31536000;
+    });
+  }
+
+  const map = L.map('map').setView([37.1, -95.7], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+  const playerList = document.getElementById('playerList');
+  const allPlayers = [];
+
+  for (const [key, loc] of Object.entries(playerData)) {
+    const popupHTML = loc.players.map(p => {
+      const id = p.name.replace(/\s/g, '');
+      return `
+        <div><strong>${p.name}</strong><br/>
+        ${p.team} (${p.league})<br/>
+        $/sec: $${p.perSecond.toFixed(2)}<br/>
+        <span id="${id}-popup">Earnings: $0.00</span><br/>
+        <a href="#" onclick="showModalFromPopup('${id}');return false;">Read Bio</a></div><hr/>`;
+    }).join('');
+
+    const marker = L.marker(loc.coords).addTo(map).bindPopup(`<strong>${loc.countryName}</strong><br/>${popupHTML}`);
+    marker.on('click', () => map.setView(loc.coords, 6));
+
+    loc.players.forEach(p => {
+      const id = p.name.replace(/\s/g, '');
+      const entry = document.createElement('div');
+      entry.innerHTML = `<strong>${p.name}</strong> - $${p.perSecond.toFixed(2)}/sec`;
+      entry.onclick = () => showModal(p);
+      playerList.appendChild(entry);
+      allPlayers.push({ ...p, id });
+    });
+  }
+
+  function showModal(p) {
+    const modal = document.getElementById('modal');
+    document.getElementById('modalContent').innerHTML = `
+      <h2>${p.name}</h2>
+      <p><strong>Team:</strong> ${p.team}</p>
+      <p><strong>League:</strong> ${p.league}</p>
+      <p><strong>Salary:</strong> $${p.salary.toLocaleString()}</p>
+      <p><strong>Endorsements:</strong> $${p.endorsements.toLocaleString()}</p>
+      <p>${p.bio}</p>`;
+    modal.style.display = 'block';
+  }
+
+  window.showModalFromPopup = function(id) {
+    const p = allPlayers.find(p => p.id === id);
+    if (p) showModal(p);
+  };
+
+  document.getElementById('closeModal').onclick = () => {
+    document.getElementById('modal').style.display = 'none';
+  };
+
+  setInterval(() => {
+    const elapsed = (Date.now() - sessionStart) / 1000;
+    allPlayers.forEach(p => {
+      const val = (p.perSecond * elapsed).toLocaleString(undefined, { maximumFractionDigits: 2 });
+      const popupEl = document.getElementById(`${p.id}-popup`);
+      if (popupEl) popupEl.textContent = `Earnings: $${val}`;
+    });
+  }, 1000);
+
+  // Chart.js Line Chart
+  const ctx = document.getElementById('earningsChart').getContext('2d');
+  const earningsChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: allPlayers.map(p => ({
+        label: p.name,
+        data: [],
+        borderColor: '#' + Math.floor(Math.random() * 16777215).toString(16),
+        borderWidth: 2,
+        fill: false,
+        tension: 0.3
+      }))
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      scales: {
+        x: { title: { display: true, text: 'Seconds Since Load' } },
+        y: { title: { display: true, text: 'Total Earnings ($)' }, beginAtZero: true }
+      }
+    }
+  });
+
+  setInterval(() => {
+    const time = Math.floor((Date.now() - sessionStart) / 1000);
+    earningsChart.data.labels.push(time);
+    earningsChart.data.datasets.forEach((ds, i) => {
+      const earnings = allPlayers[i].perSecond * time;
+      ds.data.push(earnings);
+    });
+    earningsChart.update();
+  }, 1000);
+};
+</script>
+</body>
+</html>
